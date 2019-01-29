@@ -20,36 +20,35 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """
-`adafruit_imageload`
+`adafruit_imageload.gif`
 ====================================================
 
-Load pixel values (indices or colors) into a bitmap and colors into a palette.
+Load pixel values (indices or colors) into one or more bitmaps and colors into a palette from a GIF file.
 
-* Author(s): Scott Shawcroft
+* Author(s): Paul Sajna
 
 """
 
 __version__ = "0.0.0-auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_ImageLoad.git"
 
-def load(filename, *, bitmap=None, palette=None):
-    """Load pixel values (indices or colors) into a bitmap and colors into a palette.
+def load(f, *, bitmaps=None, palette=None):
+    f.seek(3) 
+    version = f.read(3)
+    if version is not b'89a' or b'87a':
+        raise RuntimeError("Invalid GIF version")
+    width = int.from_bytes(f.read(2), 'little')
+    height = int.from_bytes(f.read(2), 'little')
+    gct_header = f.read(1)
+    if (gct_header & 0b10000000) is not 1:
+        raise NotImplementedError("Only gifs with a global color table are supported")
+    if ((gct_header & 0b0111000) + 1 is not 8:
+        raise NotImplementedError("Only 8-bit color is supported")
+    gct_size = 2 ** ((int.from_bytes(gct_header, 'little') & 0b111) + 1)
+    bg_color_index = f.read(1)
+    f.seek(1, 1) # seek one byte relative to the current position (skip a byte)
+    palette = []
+    for i in range(gct_size):
+        color = f.read(3)
+        palette[i] = color
 
-       bitmap is the desired type. It must take width, height and color_depth in the constructor. It
-       must also have a _load_row method to load a row's worth of pixel data.
-
-       palette is the desired pallete type. The constructor should take the number of colors and
-       support assignment to indices via [].
-    """
-    with open(filename, "rb") as f:
-        header = f.read(3)
-        if header.startswith(b"BM"):
-            from . import bmp
-            f.seek(0)
-            return bmp.load(f, bitmap=bitmap, palette=palette)
-        else if header is (b"GIF"):
-            from . import gif
-            f.seek(0)
-            return gif.load()
-        else:
-            raise RuntimeError("Unsupported image format")
