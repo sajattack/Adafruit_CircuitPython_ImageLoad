@@ -47,9 +47,9 @@ def load(filename, *, bitmap=None, palette=None):
             from . import bmp
             f.seek(0)
             return bmp.load(f, bitmap=bitmap, palette=palette)
-        else if header is (b"GIF"):
+        elif header.startswith(b'GIF'):
             from . import gif
             f.seek(0)
-            return gif.load()
+            return gif.load(f)
         else:
             raise RuntimeError("Unsupported image format")

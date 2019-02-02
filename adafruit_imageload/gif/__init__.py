@@ -1,6 +1,6 @@
 # The MIT License (MIT)
 #
-# Copyright (c) 2018 Scott Shawcroft for Adafruit Industries LLC
+# Copyright (c) 2019 Paul Sajna for Adafruit Industries LLC
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,23 +32,74 @@ Load pixel values (indices or colors) into one or more bitmaps and colors into a
 __version__ = "0.0.0-auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_ImageLoad.git"
 
-def load(f, *, bitmaps=None, palette=None):
+def load(f):
     f.seek(3) 
     version = f.read(3)
-    if version is not b'89a' or b'87a':
+    if (version !=  b'89a') and (version != b'87a'):
         raise RuntimeError("Invalid GIF version")
     width = int.from_bytes(f.read(2), 'little')
     height = int.from_bytes(f.read(2), 'little')
-    gct_header = f.read(1)
-    if (gct_header & 0b10000000) is not 1:
+    gct_header = int.from_bytes(f.read(1), 'little')
+    if (gct_header & 0b10000000) != 0b10000000:
         raise NotImplementedError("Only gifs with a global color table are supported")
-    if ((gct_header & 0b0111000) + 1 is not 8:
+    if (gct_header & 0b0111000 >> 3) + 1 != 8:
         raise NotImplementedError("Only 8-bit color is supported")
-    gct_size = 2 ** ((int.from_bytes(gct_header, 'little') & 0b111) + 1)
-    bg_color_index = f.read(1)
+    gct_size = 2 ** ((gct_header & 0b00000111) + 1)
+    bg_color_index = int.from_bytes(f.read(1), 'little')
     f.seek(1, 1) # seek one byte relative to the current position (skip a byte)
     palette = []
     for i in range(gct_size):
         color = f.read(3)
-        palette[i] = color
-
+        palette.append(color)
+    while True:
+        separator = int.from_bytes(f.read(1), 'little')
+        if separator == 0x21:
+            # Extension
+            label = int.from_bytes(f.read(1), 'little')
+            if label == 0xf9:
+                # Graphic Control Extension
+                print("Graphic Control Extension")
+                f.seek(1,1)
+                packed = int.from_bytes(f.read(1), 'little')
+                # delay in seconds between frames
+                delay = int.from_bytes(f.read(2), 'little') / 100
+                # We only care about the transparency flag for now
+                if packed & 1 == 1:
+                    transparency_index = int.from_bytes(f.read(1), 'little')
+                f.seek(1,1)
+            elif label == 0xff:
+                # Application Extension
+                print("Application Extension")
+                f.seek(1,1)
+                application = f.read(8)
+                if application == b'NETSCAPE':
+                    f.seek(5,1)
+                    loop_count = int.from_bytes(f.read(2), 'little')
+                    f.seek(1,1)
+                else:
+                    raise NotImplementedError("Unimplemented application extension: " 
+                        + ''.join([chr(b) for b in application]))
+            else:
+                raise NotImplementedError("Unimplemented extension: " + hex(label))
+        elif separator == 0x2c:
+            # Image Descriptor
+            print("Image Descriptor")
+            image_start_x = int.from_bytes(f.read(2), 'little')
+            image_start_y = int.from_bytes(f.read(2), 'little')
+            image_width = int.from_bytes(f.read(2), 'little')
+            image_height = int.from_bytes(f.read(2), 'little')
+            # Ignore the packed fields for now
+            f.seek(1,1)
+            # Image Data
+            print("Image Data")
+            f.seek(1,1)
+            while True:
+                byte = f.read(1) 
+                if not byte:
+                    return
+        elif separator == 0x3b:
+            # Trailer
+            print("Trailer")
+            break
+        else:
+            raise RuntimeError("Got an unexpected separator: " + hex(separator))
