@@ -32,9 +32,11 @@ Load pixel values (indices or colors) into one or more bitmaps and colors into a
 __version__ = "0.0.0-auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_ImageLoad.git"
 
+
 def load(f):
     bitmaps = []
     palette = []
+    table = []
     f.seek(3) 
     version = f.read(3)
     if (version !=  b'89a') and (version != b'87a'):
@@ -44,8 +46,8 @@ def load(f):
     gct_header = int.from_bytes(f.read(1), 'little')
     if (gct_header & 0b10000000) != 0b10000000:
         raise NotImplementedError("Only gifs with a global color table are supported")
-    if (gct_header & 0b0111000 >> 3) + 1 != 8:
-        raise NotImplementedError("Only 8-bit color is supported")
+    #if (gct_header & 0b0111000 >> 3) + 1 != 8:
+        #raise NotImplementedError("Only 8-bit color is supported")
     gct_size = 2 ** ((gct_header & 0b00000111) + 1)
     bg_color_index = int.from_bytes(f.read(1), 'little')
     f.seek(1, 1) # seek one byte relative to the current position (skip a byte)
@@ -69,6 +71,8 @@ def load(f):
                     # We only care about the transparency flag for now
                     if packed & 1 == 1:
                         transparency_index = int.from_bytes(f.read(1), 'little')
+                    else:
+                        f.seek(1,1)
                     f.seek(1,1)
                 elif label == 0xff:
                     # Application Extension
@@ -104,7 +108,7 @@ def load(f):
                 # Image Data
                 print("Image Data")
                 lzw_code_size = int.from_bytes(f.read(1), 'little')
-                bitmap = bytearray()
+                bitmap = []
                 while True:
                     block_size = int.from_bytes(f.read(1), 'little')
                     if block_size == 0:
@@ -118,5 +122,56 @@ def load(f):
             else:
                 raise RuntimeError("Got an unexpected separator: " + hex(separator))
 
-def decompress(block, lzw_code_size):
-    return b'0'
+def decompress(block, min_code_size):
+    clear_code = 1 << min_code_size
+    eoi_code = clear_code + 1
+    cur_code_size = min_code_size + 1
+    bit_offset = 0
+    code_stream = []
+    index_stream = []
+    i = 0
+    while bit_offset < 8*(len(block)-1):
+        if i+3 == (2**cur_code_size)-1:
+            cur_code_size += 1
+        code_stream.append(fetch_bits(block, cur_code_size, bit_offset))
+        bit_offset += cur_code_size
+        i += 1
+    
+    for (i, code) in enumerate(code_stream):
+        if code == clear_code:
+            table = [[i] for i in range(2**min_code_size)]
+            table.append([clear_code])
+            table.append([eoi_code])
+        elif i == 1:
+            index_stream.append(table[code_stream[1]])
+        else:
+            prev_code = code_stream[i-1]
+            if code > len(table)-1:
+                k = flatten(table[prev_code])[0]
+                index_stream.append(k)
+                index_stream.append(table[prev_code])
+                table.append(flatten([table[prev_code], k]))
+            else:
+                index_stream.append(table[code])
+                k = flatten(table[code])[0]
+                table.append(flatten([table[prev_code], k]))
+    index_stream = flatten(index_stream)
+    index_stream.pop()
+    print(index_stream)
+    return index_stream
+
+def fetch_bits(bytearr, nbits, bit_offset):
+    byte_offset = bit_offset//8
+    rem = bit_offset % 8
+    bits = 0
+    for i in range(nbits):
+        bit = (bytearr[byte_offset] | (bytearr[byte_offset+1] << 8)) & (1 << (rem + i))
+        bits |= bit >> (rem)
+    return bits
+    
+
+def flatten(items, seqtypes=(list, tuple)):
+    for i, x in enumerate(items):
+        while i < len(items) and isinstance(items[i], seqtypes):
+            items[i:i+1] = items[i]
+    return items
