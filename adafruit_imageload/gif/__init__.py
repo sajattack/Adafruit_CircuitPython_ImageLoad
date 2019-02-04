@@ -32,6 +32,7 @@ Load pixel values (indices or colors) into one or more bitmaps and colors into a
 __version__ = "0.0.0-auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_ImageLoad.git"
 
+bitmaps = []
 
 def load(f):
     bitmaps = []
@@ -108,13 +109,13 @@ def load(f):
                 # Image Data
                 print("Image Data")
                 lzw_code_size = int.from_bytes(f.read(1), 'little')
-                bitmap = []
+                compressed = bytearray()
                 while True:
                     block_size = int.from_bytes(f.read(1), 'little')
                     if block_size == 0:
                         break
-                    block = f.read(block_size)
-                    bitmap += decompress(block, lzw_code_size)
+                    compressed += f.read(block_size)
+                bitmap = decompress(compressed, lzw_code_size)
                 bitmaps.append(bitmap)
             elif separator == 0x3b:
                 # Trailer
@@ -129,34 +130,42 @@ def decompress(block, min_code_size):
     bit_offset = 0
     code_stream = []
     index_stream = []
-    i = 0
+    table = []
+    i = 1
     while bit_offset < 8*(len(block)-1):
-        if i+3 == (2**cur_code_size)-1:
+        if i == (1 << cur_code_size) - (min_code_size+1):
             cur_code_size += 1
         code_stream.append(fetch_bits(block, cur_code_size, bit_offset))
         bit_offset += cur_code_size
         i += 1
-    
+    print(code_stream)
+
+    prev_code = None
     for (i, code) in enumerate(code_stream):
+        print(code, prev_code)
         if code == clear_code:
-            table = [[i] for i in range(2**min_code_size)]
-            table.append([clear_code])
-            table.append([eoi_code])
-        elif i == 1:
-            index_stream.append(table[code_stream[1]])
+             table = [[i] for i in range(1 << min_code_size)]
+             table.append([clear_code])
+             table.append([eoi_code])
+             prev_code = None
+             print("table reset")
+             continue
+        elif code == eoi_code:
+            print("stop")
+            break
+        elif code < len(table):
+            index_stream.append(table[code])
+            k = [table[code][0]]
+            if prev_code is not None:
+                table.append(table[prev_code] + k)
+        elif prev_code is None:
+            raise ValueError("First code after a reset must be in the table")
         else:
-            prev_code = code_stream[i-1]
-            if code > len(table)-1:
-                k = flatten(table[prev_code])[0]
-                index_stream.append(k)
-                index_stream.append(table[prev_code])
-                table.append(flatten([table[prev_code], k]))
-            else:
-                index_stream.append(table[code])
-                k = flatten(table[code])[0]
-                table.append(flatten([table[prev_code], k]))
+            k = [table[prev_code][0]]
+            index_stream.append(table[prev_code] + k)
+            table.append(table[prev_code] + k)
+        prev_code = code
     index_stream = flatten(index_stream)
-    index_stream.pop()
     print(index_stream)
     return index_stream
 
