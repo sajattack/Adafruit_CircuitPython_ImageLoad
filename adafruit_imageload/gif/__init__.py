@@ -131,25 +131,25 @@ def decompress(block, min_code_size):
     code_stream = []
     index_stream = []
     table = []
-    i = 1
-    while bit_offset < 8*(len(block)-1):
-        if i == (1 << cur_code_size) - (min_code_size+1):
-            cur_code_size += 1
-        code_stream.append(fetch_bits(block, cur_code_size, bit_offset))
-        bit_offset += cur_code_size
-        i += 1
-    print(code_stream)
-
     prev_code = None
-    for (i, code) in enumerate(code_stream):
-        print(code, prev_code)
+    nextcode = clear_code + 2
+    while bit_offset < 8*(len(block)-1):
+        if nextcode == (1 << cur_code_size):
+            cur_code_size += 1
+        code = fetch_bits(block, cur_code_size, bit_offset)
+        #print(code, prev_code)
+        bit_offset += cur_code_size
         if code == clear_code:
-             table = [[i] for i in range(1 << min_code_size)]
-             table.append([clear_code])
-             table.append([eoi_code])
-             prev_code = None
-             print("table reset")
-             continue
+        #    print(table)
+        #    print(len(table)) 
+            table = [[i] for i in range(1 << min_code_size)]
+            table.append([clear_code])
+            table.append([eoi_code])
+        #    print(table)
+            nextcode = clear_code + 2
+            prev_code = None
+            print("table reset")
+            continue
         elif code == eoi_code:
             print("stop")
             break
@@ -158,15 +158,18 @@ def decompress(block, min_code_size):
             k = [table[code][0]]
             if prev_code is not None:
                 table.append(table[prev_code] + k)
+                nextcode +=1
         elif prev_code is None:
             raise ValueError("First code after a reset must be in the table")
         else:
             k = [table[prev_code][0]]
             index_stream.append(table[prev_code] + k)
             table.append(table[prev_code] + k)
+            nextcode +=1
         prev_code = code
+        #nextcode = len(table)
     index_stream = flatten(index_stream)
-    print(index_stream)
+    #print(index_stream)
     return index_stream
 
 def fetch_bits(bytearr, nbits, bit_offset):
